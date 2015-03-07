@@ -69,11 +69,15 @@
 
 	sock:sendmessage("hello server")
 
-### send wait
+### wait data
 
-wait server close socket
+wait server close socket, if you use the GUI procedure rather than a Lua script can do not call this method
 
 	sock:wait()
+
+### close socket
+
+	sock:close()
 
 ## Build LuaSocketEvent Library
 
@@ -140,7 +144,7 @@ wait server close socket
 3. lua_module_register.h join
 
 	extern "C" {
-	#include "socketevent.h"
+	\#include "socketevent.h"
 	}
 
 4. lua_module_register function join
