@@ -96,7 +96,7 @@ wait server close socket, if you use the GUI procedure rather than a Lua script 
 
 ### windows
 
-#### 1. create lua-5.3.0\build.bat file
+#### 1. create lua-5.1.4\build.bat file
 
 	cd src
 	cl /O2 /W3 /c /DLUA_BUILD_AS_DLL l*.c
@@ -125,15 +125,15 @@ wait server close socket, if you use the GUI procedure rather than a Lua script 
 
 #### windows cocos-simulator-bin
 
-##### 1. build source to `socketevent.dll`
+1. build source to `socketevent.dll`
 
-##### 2. copy `socketevent.dll` to `C:\Program Files (x86)\Cocos\cocos-simulator-bin\win32`
+2. copy `socketevent.dll` to `C:\Program Files (x86)\Cocos\cocos-simulator-bin\win32`
 
-##### 3. main.lua join
+3. main.lua join
 
 	require("socketevent")
 
-##### 4. using socketevent
+4. using socketevent
 
 #### mac simulator
 
