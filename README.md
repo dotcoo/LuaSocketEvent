@@ -6,15 +6,15 @@
 
 ## Instructions
 
-### require LuaSocketEvent lib
+### Server
+
+	nc -l 8888
+
+### Client
 
 	local socketevent = require("socketevent")
 
-### create tcp socket
-
-	local sock = socketevent.tcp()
-
-### register event
+	sock = socketevent.tcp()
 
 	sock:on("connect", function(event)
 		print("connect")
@@ -22,11 +22,6 @@
 
 	sock:on("data", function(event)
 		print("data: " .. event.data)
-	end)
-
-	-- data event and message event inconsistent data format, may cause errors
-	sock:on("message", function(event)
-		print("message: " .. event.data)
 	end)
 
 	sock:on("close", function(event)
@@ -37,47 +32,33 @@
 		print("error: " .. event.error .. ", " .. event.message)
 	end)
 
-### connect server
-
 	sock:connect("127.0.0.1", 8888)
 
-### send data
+	sock:send("hello server\n")
 
-#### server
+### Run Data Client
 
-	nc -l 8888
+	lua -i test_data.lua
 
-#### client
+### Client Send Data
 
-	sock:on("data", function(event)
-		print("data: " .. event.data)
-	end)
+	> sock:send("hello server\n")
 
-	sock:send("hello server")
-
-### send message
-
-#### server
+### Message Server
 
 	printf "\x0c\x00\x00\x00hello client\x0c\x00\x00\x00hello client" | nc -l 8888 | xxd
 
-#### client
+### Message Client
+
+	......
 
 	sock:on("message", function(event)
-		print("message: " .. event.data)
+		print("data: " .. event.data)
 	end)
 
+	......
+
 	sock:sendmessage("hello server")
-
-### wait data
-
-wait server close socket, if you use the GUI procedure rather than a Lua script can do not call this method
-
-	sock:wait()
-
-### close socket
-
-	sock:close()
 
 ## Build LuaSocketEvent Library
 
@@ -96,26 +77,26 @@ wait server close socket, if you use the GUI procedure rather than a Lua script 
 
 ### windows
 
-#### 1. create lua-5.1.4\build.bat file
+1. create `lua-5.1.4\build.bat` file
 
-	cd src
-	cl /O2 /W3 /c /DLUA_BUILD_AS_DLL l*.c
-	del lua.obj luac.obj
-	link /DLL /out:lua53.dll l*.obj
-	cl /O2 /W3 /c /DLUA_BUILD_AS_DLL lua.c luac.c
-	link /out:lua.exe lua.obj lua53.lib
-	del lua.obj
-	link /out:luac.exe l*.obj
-	cd ..
+		cd src
+		cl /O2 /W3 /c /DLUA_BUILD_AS_DLL l*.c
+		del lua.obj luac.obj
+		link /DLL /out:lua53.dll l*.obj
+		cl /O2 /W3 /c /DLUA_BUILD_AS_DLL lua.c luac.c
+		link /out:lua.exe lua.obj lua53.lib
+		del lua.obj
+		link /out:luac.exe l*.obj
+		cd ..
 
-#### 2. open VS2013 developers tools, run build.bat
+2. open VS2013 developers tools, run `build.bat`
 
-#### 3. copy socketevent.c to lua-5.1.4\src
+3. copy `socketevent.c` to `lua-5.1.4\src`
 
-#### 4. create socketevent.dll
+4. create socketevent.dll
 
-	cl /O2 /W3 /c /DLUA_BUILD_AS_DLL socketevent.c
-	link /DLL /out:socketevent.dll socketevent.obj lua53.lib
+		cl /O2 /W3 /c /DLUA_BUILD_AS_DLL socketevent.c
+		link /DLL /out:socketevent.dll socketevent.obj lua53.lib
 
 ### android
 
@@ -131,7 +112,7 @@ wait server close socket, if you use the GUI procedure rather than a Lua script 
 
 3. main.lua join
 
-	require("socketevent")
+		require("socketevent")
 
 4. using socketevent
 
@@ -143,12 +124,12 @@ wait server close socket, if you use the GUI procedure rather than a Lua script 
 
 3. lua_module_register.h join
 
-	extern "C" {
-	\#include "socketevent.h"
-	}
+		extern "C" {
+			#include "socketevent.h"
+		}
 
 4. lua_module_register function join
 
-	luaopen_socketevent(L);
+		luaopen_socketevent(L);
 
 5. Xcode build for Mac 

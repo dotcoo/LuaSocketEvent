@@ -1,9 +1,11 @@
 -- server
 -- nc -l 8888
 
+-- client
+-- lua -i test_data.lua
 local socketevent = require("socketevent")
 
-local sock = socketevent.tcp()
+sock = socketevent.tcp()
 
 sock:on("connect", function(event)
 	print("connect")
@@ -28,11 +30,16 @@ sock:on("error", function(event)
 	print("error: " .. event.error .. ", " .. event.message)
 end)
 
+local option = {
+	keepalive = 1,
+	keepidle = 60,
+	keepintvl = 10,
+	keepcnt = 3,
+}
+
+sock:setOption(option)
+
 sock:connect("127.0.0.1", 8888)
 
 print("send: hello server")
 sock:send("hello server\n")
-
-sock:wait()
-
-print("lua ok")

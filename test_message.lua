@@ -1,9 +1,11 @@
 -- server
 -- printf "\x0c\x00\x00\x00hello client\x0c\x00\x00\x00hello client" | nc -l 8888 | xxd
 
+-- client
+-- lua -i test_message.lua
 local socketevent = require("socketevent")
 
-local sock = socketevent.tcp()
+sock = socketevent.tcp()
 
 sock:on("connect", function(event)
 	print("connect")
@@ -25,7 +27,3 @@ sock:connect("127.0.0.1", 8888)
 
 print("send: hello server")
 sock:sendmessage("hello server")
-
-sock:wait()
-
-print("lua ok")

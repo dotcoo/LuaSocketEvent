@@ -2,7 +2,7 @@
 //  socketevent.c
 //  LuaSocketEvent
 //
-//  Created by dotcoo on 15/3/1.
+//  Created by dotcoo on 2015/03/01.
 //  Copyright (c) 2015 dotcoo. All rights reserved.
 //
 
@@ -24,6 +24,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <process.h>
+#include <ws2tcpip.h>
 #else
 #include <sys/socket.h>
 #include <netinet/tcp.h>
@@ -73,8 +74,15 @@ typedef struct lua_SocketEventTCP {
 
 	// socket
 	int socket;
+	const char *host;
 	const char *ip;
 	lua_Integer port;
+
+	// tcp option
+	int keepalive;
+	int keepidle;
+	int keepintvl;
+	int keepcnt;
 
 	// data buffer
 	int data_buffer_size;
@@ -159,8 +167,15 @@ static int socketevent_tcp(lua_State *L) {
 
 	// socket
 	sock->socket = -1;
+	sock->host = NULL;
 	sock->ip = NULL;
 	sock->port = -1;
+
+	// tcp option
+	sock->keepalive = 1;
+	sock->keepidle = 120;
+	sock->keepintvl = 20;
+	sock->keepcnt = 3;
 
 	// data buffer
 	sock->data_buffer_size = LUA_SOCKETEVENT_TCP_BUFFER_SIZE;
@@ -381,74 +396,46 @@ void *socketevent_tcp_data(void *psock) {
 	return NULL;
 }
 
+#if defined(_WIN32)
 void socketevent_tcp_data_win(void *psock) {
 	socketevent_tcp_data(psock);
 }
+#endif
 
-#ifdef _WIN32
-static int socketevent_tcp_connect(lua_State *L) {
+static int socketevent_tcp_setOption(lua_State *L) {
 	// sock struct
 	LSocketEventTCP *sock = (LSocketEventTCP *)luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
 
-	// check connect state
-	if ((sock->state & LUA_SOCKETEVENT_TCP_STATE_CONNECT) == LUA_SOCKETEVENT_TCP_STATE_CONNECT) {
-		return 1;
-	}
-
 	// get params
-	const char *ip = luaL_checkstring(L, 2);
-	lua_Integer port = luaL_checkinteger(L, 3);
+	luaL_checktype(L, 2, LUA_TTABLE);
 
-	sock->ip = ip;
-	sock->port = port;
+	// set option
+	lua_pushnil(L);
+	while (lua_next(L, 2)) {
+		const char *key = luaL_checkstring(L, -2);
+		lua_Integer val = luaL_checkinteger(L, -1);
 
-	WSADATA wsa;
-	//初始化套接字DLL 
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-	{
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c WSAStartup function error!");
-		return 0;
+		printf("%s, %td\n", key, val);
+
+		if (strcmp(key, "keepalive") == 0){
+			sock->keepalive = val;
+		}
+		if (strcmp(key, "keepidle") == 0){
+			sock->keepidle = val;
+		}
+		if (strcmp(key, "keepintvl") == 0){
+			sock->keepintvl = val;
+		}
+		if (strcmp(key, "keepcnt") == 0){
+			sock->keepcnt = val;
+		}
+		lua_pop(L, 1);
 	}
-
-	// create socket
-	if ((sock->socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c socket function error!");
-		return 0;
-	}
-
-	// server address
-	struct sockaddr_in server_addr;
-	memset(&server_addr, 0, sizeof(struct sockaddr));
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = inet_addr(sock->ip);
-	server_addr.sin_port = htons((u_short)sock->port);
-
-	// connect to server
-	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
-		printf("003: %d\n", errno);
-		sock->state |= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "remote host does not exist!");
-		return 0;
-	}
-
-	// set connect state
-	sock->state |= LUA_SOCKETEVENT_TCP_STATE_CONNECT;
-
-	// trigger connect handle
-	socketevent_tcp_trigger_connect(sock, sock->L);
-
-	// start thread
-	_beginthread(socketevent_tcp_data_win, 0, sock);
-
-	// set thread state
-	sock->state |= LUA_SOCKETEVENT_TCP_STATE_THREAD;
-
-	// set close state
-	sock->state ^= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
+	lua_pop(L, 1);
 
 	return 1;
 }
-#else
+
 static int socketevent_tcp_connect(lua_State *L) {
 	// sock struct
 	LSocketEventTCP *sock = luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
@@ -459,10 +446,43 @@ static int socketevent_tcp_connect(lua_State *L) {
 	}
 
 	// get params
-	const char *ip = luaL_checkstring(L, 2);
+	const char *host = luaL_checkstring(L, 2);
 	lua_Integer port = luaL_checkinteger(L, 3);
 
-	sock->ip = ip;
+#if defined(_WIN32)
+	WSADATA wsa;
+	// WinSock Startup
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, 1, "c WSAStartup function error!");
+		return 0;
+	}
+#endif
+
+	sock->host = host;
+	if (-1 == inet_addr(host)) {
+		struct hostent *hostinfo;
+		if ((hostinfo = (struct hostent*)gethostbyname(host)) == NULL) {
+			socketevent_tcp_trigger_error(sock, sock->L, 1, "domain not found!");
+			return 0;
+		}
+		if (hostinfo->h_addrtype == 2 && hostinfo->h_length == 4 && hostinfo->h_addr_list != NULL) {
+#if defined(_WIN32)
+			char ipstr[16];
+			char * ipbyte = *(hostinfo->h_addr_list);
+			sprintf(ipstr, "%d.%d.%d.%d", *ipbyte, *(ipbyte++), *(ipbyte+2), *(ipbyte+3));
+			sock->ip = ipstr;
+#else
+			char ipstr[16];
+			inet_ntop(hostinfo->h_addrtype, *(hostinfo->h_addr_list), ipstr, sizeof(ipstr));
+			sock->ip = ipstr;
+#endif
+		} else {
+			socketevent_tcp_trigger_error(sock, sock->L, 1, "not support ipv6!");
+			return 0;
+		}
+	} else {
+		sock->ip = host;
+	}
 	sock->port = port;
 
 	// create socket
@@ -473,23 +493,19 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 #if defined(__linux__) || defined(__ANDROID__)
 	// tcp option set
-	int keepalive = 1;
-	int keepidle = 60;
-	int keepintvl = 10;
-	int keepcnt = 3;
-	if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(keepalive)) < 0) {
+	if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function SO_KEEPALIVE error!");
 		return 0;
 	}
-	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&keepidle, sizeof(keepidle)) < 0) {
+	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function TCP_KEEPIDLE error!");
 		return 0;
 	}
-	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&keepintvl, sizeof(keepintvl)) < 0) {
+	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function TCP_KEEPINTVL error!");
 		return 0;
 	}
-	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&keepcnt, sizeof(keepcnt)) < 0) {
+	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function TCP_KEEPCNT error!");
 		return 0;
 	}
@@ -500,7 +516,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	memset(&server_addr, 0, sizeof(struct sockaddr));
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = inet_addr(sock->ip);
-	server_addr.sin_port = htons(sock->port);
+	server_addr.sin_port = htons((u_short)sock->port);
 
 	// connect to server
 	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
@@ -517,21 +533,24 @@ static int socketevent_tcp_connect(lua_State *L) {
 	socketevent_tcp_trigger_connect(sock, sock->L);
 
 	// start thread
+#if defined(_WIN32)
+	_beginthread(socketevent_tcp_data_win, 0, sock);
+#else
 	int retval = pthread_create(&sock->thread, NULL, socketevent_tcp_data, sock);
 	if (retval != 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, retval, "create new thread failure!");
 		return 0;
 	}
+#endif
 
 	// set thread state
 	sock->state |= LUA_SOCKETEVENT_TCP_STATE_THREAD;
 
-	// // set close state
-	// sock->state ^= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
+	// set close state
+	sock->state ^= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
 
 	return 1;
 }
-#endif
 
 static int socketevent_tcp_on(lua_State *L) {
 	// sock struct
@@ -693,6 +712,7 @@ static const luaL_Reg socketeventlib[] = {
 };
 
 static const luaL_Reg tcplib[] = {
+	{ "setOption", socketevent_tcp_setOption },
 	{ "connect", socketevent_tcp_connect },
 	{ "on", socketevent_tcp_on },
 	{ "send", socketevent_tcp_send },
