@@ -50,13 +50,13 @@
 #define LUALIB_API	LUA_API
 #define LUAMOD_API	LUALIB_API
 
-#define LUA_SOCKETEVENT_TCP_HANDLE					"SOCKETEVENT_TCP*"
-#define LUA_SOCKETEVENT_TCP_BUFFER_SIZE				0x4000
+#define LUA_SOCKETEVENT_TCP_HANDLE			"SOCKETEVENT_TCP*"
+#define LUA_SOCKETEVENT_TCP_BUFFER_SIZE			0x4000
 #define LUA_SOCKETEVENT_TCP_MESSAGE_HEAD_SIZE		4
 #define LUA_SOCKETEVENT_TCP_MESSAGE_MAX_SIZE		0x100000
-#define LUA_SOCKETEVENT_TCP_STATE_CONNECT			0x1
-#define LUA_SOCKETEVENT_TCP_STATE_THREAD			0x2
-#define LUA_SOCKETEVENT_TCP_STATE_CLOSE				0x4
+#define LUA_SOCKETEVENT_TCP_STATE_CONNECT		0x1
+#define LUA_SOCKETEVENT_TCP_STATE_THREAD		0x2
+#define LUA_SOCKETEVENT_TCP_STATE_CLOSE			0x4
 
 #ifdef _WIN32
 #define pthread_t int
@@ -83,6 +83,10 @@ typedef struct lua_SocketEventTCP {
 	int keepidle;
 	int keepintvl;
 	int keepcnt;
+
+	// action
+	int connect_sync;
+	int close_type;
 
 	// data buffer
 	int data_buffer_size;
@@ -160,7 +164,7 @@ static int socketevent_tcp(lua_State *L) {
 	sock->L = L;
 
 	// state
-	sock->state = 0x0;
+	sock->state = 0;
 
 	// pthread
 	// sock->thread = -1;
@@ -177,17 +181,21 @@ static int socketevent_tcp(lua_State *L) {
 	sock->keepintvl = 20;
 	sock->keepcnt = 3;
 
+	// action
+	sock->connect_sync = 0;
+	sock->close_type = 3;
+
 	// data buffer
 	sock->data_buffer_size = LUA_SOCKETEVENT_TCP_BUFFER_SIZE;
 	sock->data_buffer_use = 0;
-	sock->data_buffer = (char *)malloc(sock->data_buffer_size);
-	memset(sock->data_buffer, 0, sock->data_buffer_size);
+	sock->data_buffer = (char *)malloc(sock->data_buffer_size + 1);
+	memset(sock->data_buffer, 0, sock->data_buffer_size + 1);
 
 	// message buffer
 	sock->message_buffer_size = LUA_SOCKETEVENT_TCP_BUFFER_SIZE;
 	sock->message_buffer_use = 0;
-	sock->message_buffer = (char *)malloc(sock->message_buffer_size);
-	memset(sock->message_buffer, 0, sock->message_buffer_size);
+	sock->message_buffer = (char *)malloc(sock->message_buffer_size + 1);
+	memset(sock->message_buffer, 0, sock->message_buffer_size + 1);
 	sock->message_len = 0;
 
 	// event
@@ -341,7 +349,8 @@ void *socketevent_tcp_data(void *psock) {
 				if (sock->message_buffer_size > LUA_SOCKETEVENT_TCP_MESSAGE_HEAD_SIZE + LUA_SOCKETEVENT_TCP_MESSAGE_MAX_SIZE) {
 					sock->message_buffer_size = LUA_SOCKETEVENT_TCP_MESSAGE_HEAD_SIZE + LUA_SOCKETEVENT_TCP_MESSAGE_MAX_SIZE;
 				}
-				sock->message_buffer = (char *)realloc((void *)sock->message_buffer, sock->message_buffer_size);
+				sock->message_buffer = (char *)realloc((void *)sock->message_buffer, sock->message_buffer_size + 1);
+				sock->message_buffer[sock->message_buffer_size] = 0;
 			}
 
 			// append message
@@ -429,6 +438,14 @@ static int socketevent_tcp_setOption(lua_State *L) {
 		if (strcmp(key, "keepcnt") == 0){
 			sock->keepcnt = val;
 		}
+		
+		if (strcmp(key, "connect_sync") == 0){
+			sock->connect_sync = val;
+		}
+		if (strcmp(key, "close_type") == 0){
+			sock->close_type = val;
+		}
+
 		lua_pop(L, 1);
 	}
 	lua_pop(L, 1);
@@ -513,13 +530,17 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 	// server address
 	struct sockaddr_in server_addr;
-	memset(&server_addr, 0, sizeof(struct sockaddr));
+	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = inet_addr(sock->ip);
+	// server_addr.sin_addr.s_addr = inet_addr(sock->ip);
+	if (inet_pton(AF_INET, &(server_addr.sin_addr.s_addr), sock->ip) <= 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, 1, "ip address error!");
+		return 0;
+	}
 	server_addr.sin_port = htons((u_short)sock->port);
 
 	// connect to server
-	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
+	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
 		printf("003: %d\n", errno);
 		// sock->state |= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
 		socketevent_tcp_trigger_error(sock, sock->L, 1, "remote host does not exist!");
@@ -611,7 +632,8 @@ static int socketevent_tcp_send_message(lua_State *L) {
 
 	// message buffer
 	size_t message_raw_len = LUA_SOCKETEVENT_TCP_MESSAGE_HEAD_SIZE + data_size;
-	char *message_buffer = (char *)malloc(message_raw_len);
+	char *message_buffer = (char *)malloc(message_raw_len + 1);
+	message_buffer[message_raw_len] = 0;
 	memcpy(message_buffer, (void *)(&data_size), LUA_SOCKETEVENT_TCP_MESSAGE_HEAD_SIZE);
 	memcpy(message_buffer + LUA_SOCKETEVENT_TCP_MESSAGE_HEAD_SIZE, (void *)data, data_size);
 
@@ -634,11 +656,36 @@ static int socketevent_tcp_close(lua_State *L) {
 	LSocketEventTCP *sock = (LSocketEventTCP *)luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
 
 	// close socket
+	switch (sock->close_type) {
 #ifdef _WIN32
-	closesocket(sock->socket);
+		case 1:
+			shutdown(sock->socket, SD_RECEIVE);
+			break;
+		case 2:
+			shutdown(sock->socket, SD_SEND);
+			break;
+		case 3:
+			shutdown(sock->socket, SD_BOTH);
+			break;
+		default :
+			closesocket(sock->socket);
+			break;
 #else
-	close(sock->socket);
+		case 1:
+			shutdown(sock->socket, SHUT_RD);
+			break;
+		case 2:
+			shutdown(sock->socket, SHUT_WR);
+			break;
+		case 3:
+			shutdown(sock->socket, SHUT_RDWR);
+			break;
+		default :
+			close(sock->socket);
+			break;
 #endif
+	}
+
 
 	// exit thread
 #ifndef _WIN32
