@@ -20,10 +20,12 @@ sock:on("close", function(event)
 end)
 
 sock:on("error", function(event)
-	print("error: " .. event.error .. ", " .. event.message)
+	print(string.format("error: %s. message: %s;n", event.error, event.message))
 end)
 
-sock:connect("127.0.0.1", 8888)
+if sock:connect("localhost", 8888) ~= 1 then
+	os.exit(1)
+end
 
 print("send: hello server")
 sock:sendmessage("hello server")

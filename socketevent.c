@@ -118,7 +118,7 @@ void socketevent_tcp_trigger_message(LSocketEventTCP *sock, lua_State *L);
 
 void socketevent_tcp_trigger_close(LSocketEventTCP *sock, lua_State *L);
 
-void socketevent_tcp_trigger_error(LSocketEventTCP *sock, lua_State *L, int err, const char *message);
+void socketevent_tcp_trigger_error(LSocketEventTCP *sock, lua_State *L, int line, int err, const char *message);
 
 void *socketevent_tcp_data(void *psock);
 
@@ -280,7 +280,7 @@ void socketevent_tcp_trigger_close(LSocketEventTCP *sock, lua_State *L) {
 	}
 }
 
-void socketevent_tcp_trigger_error(LSocketEventTCP *sock, lua_State *L, int err, const char *message) {
+void socketevent_tcp_trigger_error(LSocketEventTCP *sock, lua_State *L, int line, int err, const char *message) {
 	if (sock->event_error < 0) {
 		return;
 	}
@@ -288,6 +288,9 @@ void socketevent_tcp_trigger_error(LSocketEventTCP *sock, lua_State *L, int err,
 	// trigger lua error handle
 	lua_rawgeti(L, LUA_REGISTRYINDEX, sock->event_error);
 	lua_newtable(L);
+	lua_pushliteral(L, "line");
+	lua_pushinteger(L, line);
+	lua_settable(L, -3);
 	lua_pushliteral(L, "error");
 	lua_pushinteger(L, err);
 	lua_settable(L, -3);
@@ -316,7 +319,7 @@ void *socketevent_tcp_data(void *psock) {
 			break;
 		}
 		if (sock->data_buffer_use < 0) {
-			socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 			break;
 		}
 
@@ -325,10 +328,10 @@ void *socketevent_tcp_data(void *psock) {
 		printf("c recv len: %d\n", sock->data_buffer_use);
 		int i = 0;
 		for (i = 0; i < sock->data_buffer_use; i++) {
-		printf("%02x ", *(sock->data_buffer + i));
-		if ((i+1) % 10 == 0) {
-		printf("\n");
-		}
+			printf("%02x ", *(sock->data_buffer + i));
+			if ((i+1) % 10 == 0) {
+				printf("\n");
+			}
 		}
 		printf("\n");
 		*/
@@ -369,7 +372,7 @@ void *socketevent_tcp_data(void *psock) {
 				// check message len
 				if (sock->message_len > LUA_SOCKETEVENT_TCP_MESSAGE_MAX_SIZE) {
 					break_while = 1;
-					socketevent_tcp_trigger_error(sock, sock->L, 1, "message too long!");
+					socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 1, "message too long!");
 					break;
 				}
 
@@ -396,6 +399,9 @@ void *socketevent_tcp_data(void *psock) {
 		}
 	}
 
+	// socket state
+	sock->state = 2;
+
 	// trigger close handle
 	socketevent_tcp_trigger_close(sock, sock->L);
 
@@ -420,8 +426,6 @@ static int socketevent_tcp_setOption(lua_State *L) {
 	while (lua_next(L, 2)) {
 		const char *key = luaL_checkstring(L, -2);
 		lua_Integer val = luaL_checkinteger(L, -1);
-
-		printf("%s, %td\n", key, val);
 
 		if (strcmp(key, "keepalive") == 0){
 			sock->keepalive = val;
@@ -455,10 +459,12 @@ static int socketevent_tcp_connect(lua_State *L) {
 	LSocketEventTCP *sock = luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
 
 	// check connect state
-	if ((sock->state & LUA_SOCKETEVENT_TCP_STATE_CONNECT) == LUA_SOCKETEVENT_TCP_STATE_CONNECT) {
-		lua_pushinteger(L, 1);
-		return 1;
+	if (sock->state != 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 6, "socket has connect");
+		lua_pushinteger(L, 0);
+		return 0;
 	}
+	sock->state++;
 
 	// get params
 	const char *host = luaL_checkstring(L, 2);
@@ -468,7 +474,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	WSADATA wsa;
 	// WinSock Startup
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 2, "c WSAStartup function error!");
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 2, "c WSAStartup function error!");
 		lua_pushinteger(L, 0);
 		return 0;
 	}
@@ -478,7 +484,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	if (-1 == inet_addr(host)) {
 		struct hostent *hostinfo;
 		if ((hostinfo = (struct hostent*)gethostbyname(host)) == NULL) {
-			socketevent_tcp_trigger_error(sock, sock->L, h_errno, hstrerror(h_errno));
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, h_errno, hstrerror(h_errno));
 			lua_pushinteger(L, 0);
 			return 0;
 		}
@@ -494,7 +500,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 			sock->ip = ipstr;
 #endif
 		} else {
-			socketevent_tcp_trigger_error(sock, sock->L, 3, "not support ipv6!");
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 3, "not support ipv6!");
 			lua_pushinteger(L, 0);
 			return 0;
 		}
@@ -505,7 +511,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 	// create socket
 	if ((sock->socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
@@ -513,22 +519,22 @@ static int socketevent_tcp_connect(lua_State *L) {
 #if defined(__linux__) || defined(__ANDROID__)
 	// tcp option set
 	if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
@@ -538,9 +544,8 @@ static int socketevent_tcp_connect(lua_State *L) {
 	struct sockaddr_in server_addr;
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-	// server_addr.sin_addr.s_addr = inet_addr(sock->ip);
-	if (inet_pton(AF_INET, (const char *)&(server_addr.sin_addr.s_addr), &(sock->ip)) <= 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+	if (inet_pton(AF_INET, (const char *)sock->ip, &server_addr.sin_addr) <= 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 12, "domain error");
 		lua_pushinteger(L, 0);
 		return 0;
 	}
@@ -548,15 +553,10 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 	// connect to server
 	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-		printf("003: %d\n", errno);
-		// sock->state |= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
-
-	// set connect state
-	sock->state |= LUA_SOCKETEVENT_TCP_STATE_CONNECT;
 
 	// trigger connect handle
 	socketevent_tcp_trigger_connect(sock, sock->L);
@@ -567,17 +567,11 @@ static int socketevent_tcp_connect(lua_State *L) {
 #else
 	int retval = pthread_create(&sock->thread, NULL, socketevent_tcp_data, sock);
 	if (retval != 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, retval, strerror(retval));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, retval, strerror(retval));
 		lua_pushinteger(L, 0);
 		return 0;
 	}
 #endif
-
-	// set thread state
-	sock->state |= LUA_SOCKETEVENT_TCP_STATE_THREAD;
-
-	// set close state
-	sock->state ^= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
 
 	// return result
 	lua_pushinteger(L, 1);
@@ -596,20 +590,15 @@ static int socketevent_tcp_on(lua_State *L) {
 	// save event handle
 	if (strcmp("connect", name) == 0) {
 		sock->event_connect = handler;
-	}
-	else if (strcmp("data", name) == 0) {
+	} else if (strcmp("data", name) == 0) {
 		sock->event_data = handler;
-	}
-	else if (strcmp("close", name) == 0) {
+	} else if (strcmp("close", name) == 0) {
 		sock->event_close = handler;
-	}
-	else if (strcmp("error", name) == 0) {
+	} else if (strcmp("error", name) == 0) {
 		sock->event_error = handler;
-	}
-	else if (strcmp("message", name) == 0) {
+	} else if (strcmp("message", name) == 0) {
 		sock->event_message = handler;
-	}
-	else {
+	} else {
 		luaL_error(L, "event %s not support!", name);
 	}
 
@@ -620,6 +609,13 @@ static int socketevent_tcp_send(lua_State *L) {
 	// sock struct
 	LSocketEventTCP *sock = (LSocketEventTCP *)luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
 
+	// check connect state
+	if (sock->state != 1) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 5, "socket not connect!");
+		lua_pushinteger(L, 0);
+		return 0;
+	}
+
 	// get params
 	size_t data_size = 0;
 	const char *data = luaL_checklstring(L, 2, &data_size);
@@ -627,7 +623,7 @@ static int socketevent_tcp_send(lua_State *L) {
 	// send data
 	int retval = send(sock->socket, data, data_size, 0);
 	if (retval == -1) {
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		return 0;
 	}
 
@@ -637,6 +633,12 @@ static int socketevent_tcp_send(lua_State *L) {
 static int socketevent_tcp_send_message(lua_State *L) {
 	// sock struct
 	LSocketEventTCP *sock = (LSocketEventTCP *)luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
+
+	// check connect state
+	if (sock->state != 1) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 5, "socket not connect!");
+		return 0;
+	}
 
 	// get params
 	size_t data_size = 0;
@@ -653,7 +655,7 @@ static int socketevent_tcp_send_message(lua_State *L) {
 	int retval = send(sock->socket, message_buffer, message_raw_len, 0);
 	if (retval == -1) {
 		free(message_buffer);
-		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
 		return 0;
 	}
 
@@ -666,6 +668,13 @@ static int socketevent_tcp_send_message(lua_State *L) {
 static int socketevent_tcp_close(lua_State *L) {
 	// sock struct
 	LSocketEventTCP *sock = (LSocketEventTCP *)luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
+
+	// check connect state
+	if (sock->state != 1) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 5, "socket not connect!");
+		lua_pushinteger(L, 0);
+		return 0;
+	}
 
 	// close socket
 	switch (sock->close_type) {
@@ -703,9 +712,6 @@ static int socketevent_tcp_close(lua_State *L) {
 #ifndef _WIN32
 	pthread_cancel(sock->thread);
 #endif
-
-	// trigger close handle
-	socketevent_tcp_trigger_close(sock, L);
 
 	return 1;
 }
