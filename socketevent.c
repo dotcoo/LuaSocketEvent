@@ -311,15 +311,12 @@ void *socketevent_tcp_data(void *psock) {
 	// recv data
 	while (1) {
 		sock->data_buffer_use = recv(sock->socket, sock->data_buffer, sock->data_buffer_size, 0);
-
 		// check error
 		if (sock->data_buffer_use == 0) {
-			printf("001: %d\n", errno);
 			break;
 		}
 		if (sock->data_buffer_use < 0) {
-			printf("002: %d\n", errno);
-			socketevent_tcp_trigger_error(sock, sock->L, sock->data_buffer_use, "recv data error!");
+			socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 			break;
 		}
 
@@ -470,7 +467,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	WSADATA wsa;
 	// WinSock Startup
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c WSAStartup function error!");
+		socketevent_tcp_trigger_error(sock, sock->L, 2, "c WSAStartup function error!");
 		return 0;
 	}
 #endif
@@ -479,7 +476,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	if (-1 == inet_addr(host)) {
 		struct hostent *hostinfo;
 		if ((hostinfo = (struct hostent*)gethostbyname(host)) == NULL) {
-			socketevent_tcp_trigger_error(sock, sock->L, 1, "domain not found!");
+			socketevent_tcp_trigger_error(sock, sock->L, h_errno, hstrerror(h_errno));
 			return 0;
 		}
 		if (hostinfo->h_addrtype == 2 && hostinfo->h_length == 4 && hostinfo->h_addr_list != NULL) {
@@ -494,7 +491,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 			sock->ip = ipstr;
 #endif
 		} else {
-			socketevent_tcp_trigger_error(sock, sock->L, 1, "not support ipv6!");
+			socketevent_tcp_trigger_error(sock, sock->L, 3, "not support ipv6!");
 			return 0;
 		}
 	} else {
@@ -504,26 +501,26 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 	// create socket
 	if ((sock->socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c socket function error!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 
 #if defined(__linux__) || defined(__ANDROID__)
 	// tcp option set
 	if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function SO_KEEPALIVE error!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function TCP_KEEPIDLE error!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function TCP_KEEPINTVL error!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "c setsockopt function TCP_KEEPCNT error!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 #endif
@@ -533,8 +530,8 @@ static int socketevent_tcp_connect(lua_State *L) {
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
 	// server_addr.sin_addr.s_addr = inet_addr(sock->ip);
-	if (inet_pton(AF_INET, &(server_addr.sin_addr.s_addr), sock->ip) <= 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "ip address error!");
+	if (inet_pton(AF_INET, (const char *)&(server_addr.sin_addr.s_addr), &(sock->ip)) <= 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 	server_addr.sin_port = htons((u_short)sock->port);
@@ -543,7 +540,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
 		printf("003: %d\n", errno);
 		// sock->state |= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
-		socketevent_tcp_trigger_error(sock, sock->L, 1, "remote host does not exist!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 
@@ -559,7 +556,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 #else
 	int retval = pthread_create(&sock->thread, NULL, socketevent_tcp_data, sock);
 	if (retval != 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, retval, "create new thread failure!");
+		socketevent_tcp_trigger_error(sock, sock->L, retval, strerror(retval));
 		return 0;
 	}
 #endif
@@ -615,7 +612,7 @@ static int socketevent_tcp_send(lua_State *L) {
 	// send data
 	int retval = send(sock->socket, data, data_size, 0);
 	if (retval == -1) {
-		socketevent_tcp_trigger_error(sock, sock->L, retval, "send data failure!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 
@@ -641,7 +638,7 @@ static int socketevent_tcp_send_message(lua_State *L) {
 	int retval = send(sock->socket, message_buffer, message_raw_len, 0);
 	if (retval == -1) {
 		free(message_buffer);
-		socketevent_tcp_trigger_error(sock, sock->L, retval, "send message failure!");
+		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
 		return 0;
 	}
 
