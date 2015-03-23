@@ -183,7 +183,7 @@ static int socketevent_tcp(lua_State *L) {
 
 	// action
 	sock->connect_sync = 0;
-	sock->close_type = 3;
+	sock->close_type = 2;
 
 	// data buffer
 	sock->data_buffer_size = LUA_SOCKETEVENT_TCP_BUFFER_SIZE;
@@ -265,10 +265,9 @@ void socketevent_tcp_trigger_close(LSocketEventTCP *sock, lua_State *L) {
 	}
 
 	// check close state
-	if ((sock->state & LUA_SOCKETEVENT_TCP_STATE_CLOSE) == LUA_SOCKETEVENT_TCP_STATE_CLOSE) {
+	if (sock->state != 1) {
 		return;
 	}
-	sock->state |= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
 
 	// trigger lua close handle
 	lua_rawgeti(L, LUA_REGISTRYINDEX, sock->event_close);
@@ -399,11 +398,11 @@ void *socketevent_tcp_data(void *psock) {
 		}
 	}
 
-	// socket state
-	sock->state = 2;
-
 	// trigger close handle
 	socketevent_tcp_trigger_close(sock, sock->L);
+
+	// socket state
+	sock->state = 2;
 
 	return NULL;
 }
@@ -707,12 +706,6 @@ static int socketevent_tcp_close(lua_State *L) {
 #endif
 	}
 
-
-	// exit thread
-#ifndef _WIN32
-	pthread_cancel(sock->thread);
-#endif
-
 	return 1;
 }
 
@@ -724,7 +717,7 @@ static int socketevent_tcp_wait(lua_State *L) {
 #ifdef _WIN32
 	while (1) {
 		// check close state
-		if ((sock->state & LUA_SOCKETEVENT_TCP_STATE_CLOSE) == LUA_SOCKETEVENT_TCP_STATE_CLOSE) {
+		if (sock->state == 2) {
 			return 1;
 		}
 		Sleep(1000);

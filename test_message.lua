@@ -20,7 +20,7 @@ sock:on("close", function(event)
 end)
 
 sock:on("error", function(event)
-	print(string.format("error: %s. message: %s;n", event.error, event.message))
+	print(string.format("error: %s. message: %s.", event.error, event.message))
 end)
 
 if sock:connect("localhost", 8888) ~= 1 then
