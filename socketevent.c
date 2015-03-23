@@ -456,6 +456,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 	// check connect state
 	if ((sock->state & LUA_SOCKETEVENT_TCP_STATE_CONNECT) == LUA_SOCKETEVENT_TCP_STATE_CONNECT) {
+		lua_pushinteger(L, 1);
 		return 1;
 	}
 
@@ -468,6 +469,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// WinSock Startup
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, 2, "c WSAStartup function error!");
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 #endif
@@ -477,9 +479,10 @@ static int socketevent_tcp_connect(lua_State *L) {
 		struct hostent *hostinfo;
 		if ((hostinfo = (struct hostent*)gethostbyname(host)) == NULL) {
 			socketevent_tcp_trigger_error(sock, sock->L, h_errno, hstrerror(h_errno));
+			lua_pushinteger(L, 0);
 			return 0;
 		}
-		if (hostinfo->h_addrtype == 2 && hostinfo->h_length == 4 && hostinfo->h_addr_list != NULL) {
+		if (hostinfo->h_addrtype == AF_INET && hostinfo->h_addr_list != NULL) {
 #if defined(_WIN32)
 			char ipstr[16];
 			char * ipbyte = *(hostinfo->h_addr_list);
@@ -492,6 +495,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 #endif
 		} else {
 			socketevent_tcp_trigger_error(sock, sock->L, 3, "not support ipv6!");
+			lua_pushinteger(L, 0);
 			return 0;
 		}
 	} else {
@@ -502,6 +506,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// create socket
 	if ((sock->socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 
@@ -509,18 +514,22 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// tcp option set
 	if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 #endif
@@ -532,6 +541,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// server_addr.sin_addr.s_addr = inet_addr(sock->ip);
 	if (inet_pton(AF_INET, (const char *)&(server_addr.sin_addr.s_addr), &(sock->ip)) <= 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 	server_addr.sin_port = htons((u_short)sock->port);
@@ -541,6 +551,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 		printf("003: %d\n", errno);
 		// sock->state |= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
 		socketevent_tcp_trigger_error(sock, sock->L, errno, strerror(errno));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 
@@ -557,6 +568,7 @@ static int socketevent_tcp_connect(lua_State *L) {
 	int retval = pthread_create(&sock->thread, NULL, socketevent_tcp_data, sock);
 	if (retval != 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, retval, strerror(retval));
+		lua_pushinteger(L, 0);
 		return 0;
 	}
 #endif
@@ -566,6 +578,9 @@ static int socketevent_tcp_connect(lua_State *L) {
 
 	// set close state
 	sock->state ^= LUA_SOCKETEVENT_TCP_STATE_CLOSE;
+
+	// return result
+	lua_pushinteger(L, 1);
 
 	return 1;
 }
