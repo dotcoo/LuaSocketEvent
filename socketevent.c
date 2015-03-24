@@ -483,7 +483,11 @@ static int socketevent_tcp_connect(lua_State *L) {
 	if (-1 == inet_addr(host)) {
 		struct hostent *hostinfo;
 		if ((hostinfo = (struct hostent*)gethostbyname(host)) == NULL) {
+#if defined(_WIN32)
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, h_errno, hstrerror(h_errno));
+#else
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 18, "domain not found!");
+#endif
 			lua_pushinteger(L, 0);
 			return 0;
 		}
