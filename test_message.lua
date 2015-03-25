@@ -8,7 +8,10 @@ local socketevent = require("socketevent")
 sock = socketevent.tcp()
 
 sock:on("connect", function(event)
-	print("connect")
+	print("connect: ok!")
+
+	print("send: hello server")
+	sock:sendmessage("hello server\n")
 end)
 
 sock:on("message", function(event)
@@ -16,16 +19,11 @@ sock:on("message", function(event)
 end)
 
 sock:on("close", function(event)
-	print("close")
+	print("close: bye!")
 end)
 
 sock:on("error", function(event)
-	print(string.format("error: %s. message: %s.", event.error, event.message))
+	print(string.format("c line: %s. error: %s. message: %s.", event.line, event.error, event.message))
 end)
 
-if sock:connect("localhost", 8888) ~= 1 then
-	os.exit(1)
-end
-
-print("send: hello server")
-sock:sendmessage("hello server")
+sock:connect("127.0.0.1", 8888)

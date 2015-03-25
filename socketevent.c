@@ -83,7 +83,6 @@ typedef struct lua_SocketEventTCP {
 	lua_Integer port;
 
 	// tcp option
-	int timeout;
 	int keepalive;
 	int keepidle;
 	int keepintvl;
@@ -175,7 +174,6 @@ static int socketevent_tcp(lua_State *L) {
 	// sock->thread = -1;
 
 	// socket
-	sock->timeout = 15000;
 	sock->socket = -1;
 	sock->host = NULL;
 	sock->ip = NULL;
@@ -316,6 +314,25 @@ void *socketevent_tcp_data(void *psock) {
 	// create new thread State
 	sock->L = lua_newthread(sock->L);
 
+	// server address
+	struct sockaddr_in server_addr;
+	memset(&server_addr, 0, sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	if (inet_pton(AF_INET, (const char *)sock->ip, &server_addr.sin_addr) <= 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 12, "domain error");
+		return 0;
+	}
+	server_addr.sin_port = htons((u_short)sock->port);
+
+	// connect to server
+	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+		return NULL;
+	}
+
+	// trigger connect handle
+	socketevent_tcp_trigger_connect(sock, sock->L);
+
 	// recv data
 	while (1) {
 		sock->data_buffer_use = recv(sock->socket, sock->data_buffer, sock->data_buffer_size, 0);
@@ -419,7 +436,7 @@ void socketevent_tcp_data_win(void *psock) {
 }
 #endif
 
-static int socketevent_tcp_setOption(lua_State *L) {
+static int socketevent_tcp_setopt(lua_State *L) {
 	// sock struct
 	LSocketEventTCP *sock = (LSocketEventTCP *)luaL_checkudata(L, 1, LUA_SOCKETEVENT_TCP_HANDLE);
 
@@ -431,10 +448,6 @@ static int socketevent_tcp_setOption(lua_State *L) {
 	while (lua_next(L, 2)) {
 		const char *key = luaL_checkstring(L, -2);
 		lua_Integer val = luaL_checkinteger(L, -1);
-
-		if (strcmp(key, "timeout") == 0){
-			sock->timeout = val;
-		}
 
 		if (strcmp(key, "keepalive") == 0){
 			sock->keepalive = val;
@@ -470,7 +483,6 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// check connect state
 	if (sock->state != 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 6, "socket has connect");
-		lua_pushinteger(L, 0);
 		return 0;
 	}
 	sock->state++;
@@ -484,7 +496,6 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// WinSock Startup
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 2, "c WSAStartup function error!");
-		lua_pushinteger(L, 0);
 		return 0;
 	}
 #endif
@@ -498,7 +509,6 @@ static int socketevent_tcp_connect(lua_State *L) {
 #else
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 18, "domain not found!");
 #endif
-			lua_pushinteger(L, 0);
 			return 0;
 		}
 		if (hostinfo->h_addrtype == AF_INET && hostinfo->h_addr_list != NULL) {
@@ -514,7 +524,6 @@ static int socketevent_tcp_connect(lua_State *L) {
 #endif
 		} else {
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 3, "not support ipv6!");
-			lua_pushinteger(L, 0);
 			return 0;
 		}
 	} else {
@@ -525,71 +534,30 @@ static int socketevent_tcp_connect(lua_State *L) {
 	// create socket
 	if ((sock->socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-
-	// set timeout
-	struct timeval timeout;
-	timeout.tv_sec = sock->timeout / 1000;
-	timeout.tv_usec = sock->timeout % 1000;
-	if (setsockopt(sock->socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-	if (setsockopt(sock->socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
 		return 0;
 	}
 
 #if defined(__linux__) || defined(__ANDROID__)
 	// tcp option set
-	if (sock->socket == 1) {
+	if (sock->keepalive == 1) {
 		if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-			lua_pushinteger(L, 0);
 			return 0;
 		}
 		if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-			lua_pushinteger(L, 0);
 			return 0;
 		}
 		if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-			lua_pushinteger(L, 0);
 			return 0;
 		}
 		if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-			lua_pushinteger(L, 0);
 			return 0;
 		}
 	}
 #endif
-
-	// server address
-	struct sockaddr_in server_addr;
-	memset(&server_addr, 0, sizeof(server_addr));
-	server_addr.sin_family = AF_INET;
-	if (inet_pton(AF_INET, (const char *)sock->ip, &server_addr.sin_addr) <= 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 12, "domain error");
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-	server_addr.sin_port = htons((u_short)sock->port);
-
-	// connect to server
-	if (connect(sock->socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-
-	// trigger connect handle
-	socketevent_tcp_trigger_connect(sock, sock->L);
 
 	// start thread
 #if defined(_WIN32)
@@ -598,13 +566,9 @@ static int socketevent_tcp_connect(lua_State *L) {
 	int retval = pthread_create(&sock->thread, NULL, socketevent_tcp_data, sock);
 	if (retval != 0) {
 		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, retval, strerror(retval));
-		lua_pushinteger(L, 0);
 		return 0;
 	}
 #endif
-
-	// return result
-	lua_pushinteger(L, 1);
 
 	return 1;
 }
@@ -801,7 +765,7 @@ static const luaL_Reg socketeventlib[] = {
 };
 
 static const luaL_Reg tcplib[] = {
-	{ "setOption", socketevent_tcp_setOption },
+	{ "setopt", socketevent_tcp_setopt },
 	{ "connect", socketevent_tcp_connect },
 	{ "on", socketevent_tcp_on },
 	{ "send", socketevent_tcp_send },
