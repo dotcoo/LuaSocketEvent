@@ -39,7 +39,7 @@ local option = {
 
 sock:setOption(option)
 
-if sock:connect("localhost", 8888) ~= 1 then
+if sock:connect("192.168.1.99", 8888) ~= 1 then
 	os.exit(1)
 end
 

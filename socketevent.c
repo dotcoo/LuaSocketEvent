@@ -58,6 +58,10 @@
 #define LUA_SOCKETEVENT_TCP_STATE_THREAD		0x2
 #define LUA_SOCKETEVENT_TCP_STATE_CLOSE			0x4
 
+#if defined(__APPLE__)
+#define SOL_TCP IPPROTO_TCP
+#endif
+
 #ifdef _WIN32
 #define pthread_t int
 #endif
@@ -79,6 +83,7 @@ typedef struct lua_SocketEventTCP {
 	lua_Integer port;
 
 	// tcp option
+	int timeout;
 	int keepalive;
 	int keepidle;
 	int keepintvl;
@@ -170,6 +175,7 @@ static int socketevent_tcp(lua_State *L) {
 	// sock->thread = -1;
 
 	// socket
+	sock->timeout = 15000;
 	sock->socket = -1;
 	sock->host = NULL;
 	sock->ip = NULL;
@@ -426,6 +432,10 @@ static int socketevent_tcp_setOption(lua_State *L) {
 		const char *key = luaL_checkstring(L, -2);
 		lua_Integer val = luaL_checkinteger(L, -1);
 
+		if (strcmp(key, "timeout") == 0){
+			sock->timeout = val;
+		}
+
 		if (strcmp(key, "keepalive") == 0){
 			sock->keepalive = val;
 		}
@@ -519,27 +529,44 @@ static int socketevent_tcp_connect(lua_State *L) {
 		return 0;
 	}
 
+	// set timeout
+	struct timeval timeout;
+	timeout.tv_sec = sock->timeout / 1000;
+	timeout.tv_usec = sock->timeout % 1000;
+	if (setsockopt(sock->socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+		lua_pushinteger(L, 0);
+		return 0;
+	}
+	if (setsockopt(sock->socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+		lua_pushinteger(L, 0);
+		return 0;
+	}
+
 #if defined(__linux__) || defined(__ANDROID__)
 	// tcp option set
-	if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
-	}
-	if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
-		socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
-		lua_pushinteger(L, 0);
-		return 0;
+	if (sock->socket == 1) {
+		if (setsockopt(sock->socket, SOL_SOCKET, SO_KEEPALIVE, (void *)&(sock->keepalive), sizeof(sock->keepalive)) < 0) {
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+			lua_pushinteger(L, 0);
+			return 0;
+		}
+		if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPIDLE, (void *)&(sock->keepidle), sizeof(sock->keepidle)) < 0) {
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+			lua_pushinteger(L, 0);
+			return 0;
+		}
+		if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPINTVL, (void *)&(sock->keepintvl), sizeof(sock->keepintvl)) < 0) {
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+			lua_pushinteger(L, 0);
+			return 0;
+		}
+		if (setsockopt(sock->socket, SOL_TCP, TCP_KEEPCNT, (void *)&(sock->keepcnt), sizeof(sock->keepcnt)) < 0) {
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+			lua_pushinteger(L, 0);
+			return 0;
+		}
 	}
 #endif
 
