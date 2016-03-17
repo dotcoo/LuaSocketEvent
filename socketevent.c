@@ -312,7 +312,7 @@ void *socketevent_tcp_data(void *psock) {
 	LSocketEventTCP *sock = (LSocketEventTCP *)psock;
 
 	// create new thread State
-	sock->L = lua_newthread(sock->L);
+	lua_State *L = lua_newthread(sock->L);
 
 	// server address
 	struct sockaddr_in server_addr;
@@ -341,7 +341,7 @@ void *socketevent_tcp_data(void *psock) {
 			break;
 		}
 		if (sock->data_buffer_use < 0) {
-			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, errno, strerror(errno));
+			socketevent_tcp_trigger_error(sock, L, __LINE__, errno, strerror(errno));
 			break;
 		}
 
@@ -359,7 +359,7 @@ void *socketevent_tcp_data(void *psock) {
 		*/
 
 		// trigger data event
-		socketevent_tcp_trigger_data(sock, sock->L);
+		socketevent_tcp_trigger_data(sock, L);
 
 		// check message handle
 		if (sock->event_message >= 0) {
@@ -394,7 +394,7 @@ void *socketevent_tcp_data(void *psock) {
 				// check message len
 				if (sock->message_len > LUA_SOCKETEVENT_TCP_MESSAGE_MAX_SIZE) {
 					break_while = 1;
-					socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 1, "message too long!");
+					socketevent_tcp_trigger_error(sock, L, __LINE__, 1, "message too long!");
 					break;
 				}
 
@@ -407,7 +407,7 @@ void *socketevent_tcp_data(void *psock) {
 				}
 
 				// trigger message event
-				socketevent_tcp_trigger_message(sock, sock->L);
+				socketevent_tcp_trigger_message(sock, L);
 
 				// move data
 				if (sock->message_buffer_use - message_raw_len > 0) {
@@ -422,7 +422,7 @@ void *socketevent_tcp_data(void *psock) {
 	}
 
 	// trigger close handle
-	socketevent_tcp_trigger_close(sock, sock->L);
+	socketevent_tcp_trigger_close(sock, L);
 
 	// socket state
 	sock->state = 2;
