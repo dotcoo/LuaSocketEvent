@@ -4,6 +4,10 @@
 
 `LuaSocketEvent` supports data and message in two formats, data are the original data, the message is 4 bytes unsigned int little endian and message content
 
+## Notice
+
+	Please implement lua_lock and lua_unlock for thread safe.
+
 ## Instructions
 
 ### Server
