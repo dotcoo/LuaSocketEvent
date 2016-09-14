@@ -505,9 +505,9 @@ static int socketevent_tcp_connect(lua_State *L) {
 		struct hostent *hostinfo;
 		if ((hostinfo = (struct hostent*)gethostbyname(host)) == NULL) {
 #if defined(_WIN32)
-			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, h_errno, hstrerror(h_errno));
-#else
 			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, 18, "domain not found!");
+#else
+			socketevent_tcp_trigger_error(sock, sock->L, __LINE__, h_errno, hstrerror(h_errno));
 #endif
 			return 0;
 		}
