@@ -1,3 +1,7 @@
+## 仅供学习交流,请勿在线上项目使用
+
+## Only for learning exchange, do not use online projects
+
 # Lua Socket Event
 
 `LuaSocketEvent` the Lua Socket Event, Asynchronous Socket. support platform for Linux, MacOSX, Windows, IOS, Android, Cocos2d-x.
